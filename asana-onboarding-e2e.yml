@@ -1,0 +1,375 @@
+name: Asana onboarding E2E
+
+on:
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/asana-onboarding-e2e.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tests/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/asana-onboarding-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A later workflow run cancels an older entire matrix, but the shard jobs within
+# the same run are allowed to execute concurrently.
+concurrency:
+  group: asana-onboarding-e2e-main
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Playwright suite without secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted repository code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Type-check and discover tests
+        run: npm run test:onboarding:validate
+
+  onboarding-e2e:
+    name: Onboarding shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+    needs: validate
+    # Never release the browser-state secret to pull-request code. Every shard
+    # runs only from protected main after merge or a protected manual dispatch.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: asana-e2e
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2]
+        shardTotal: [2]
+    env:
+      CI: 'true'
+      ASANA_TEST_WORKSPACE_URL: ${{ vars.ASANA_TEST_WORKSPACE_URL }}
+      ASANA_TEST_PROJECT_PREFIX: ${{ vars.ASANA_TEST_PROJECT_PREFIX }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+      PLAYWRIGHT_SHARD_INDEX: ${{ matrix.shardIndex }}
+      PLAYWRIGHT_SHARD_TOTAL: ${{ matrix.shardTotal }}
+    steps:
+      - name: Check out protected main branch code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chromium and required Linux libraries
+        run: npx playwright install --with-deps chromium
+
+      - name: Materialize approved browser session
+        shell: bash
+        env:
+          ASANA_STORAGE_STATE_B64: ${{ secrets.ASANA_STORAGE_STATE_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ASANA_STORAGE_STATE_B64:-}" ]]; then
+            echo "ASANA_STORAGE_STATE_B64 is not available. Check the protected asana-e2e environment secret."
+            exit 1
+          fi
+          echo "::add-mask::$ASANA_STORAGE_STATE_B64"
+          auth_file="$RUNNER_TEMP/asana_auth.json"
+          umask 077
+          printf '%s' "$ASANA_STORAGE_STATE_B64" | base64 --decode > "$auth_file"
+          if [[ ! -s "$auth_file" ]]; then
+            echo "Decoded session-state file is empty."
+            exit 1
+          fi
+          node -e "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'));" "$auth_file"
+          echo "ASANA_STORAGE_STATE=$auth_file" >> "$GITHUB_ENV"
+
+      - name: Record shard start time
+        id: shard_start
+        shell: bash
+        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Run independent onboarding checks for this shard
+        id: playwright
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+          npx playwright test \
+            --project=chromium-onboarding-sharded \
+            --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+
+      - name: Export safe dashboard metrics for this shard
+        if: always()
+        env:
+          PLAYWRIGHT_JOB_OUTCOME: ${{ steps.playwright.outcome }}
+          SHARD_METRICS_STARTED_EPOCH: ${{ steps.shard_start.outputs.epoch }}
+          SHARD_TEST_STARTED_EPOCH: ${{ steps.playwright.outputs.epoch }}
+        run: >-
+          node scripts/export-shard-metrics.mjs
+          --input test-results/playwright-results.json
+          --output dashboard-metrics/shard-${{ matrix.shardIndex }}.json
+
+      - name: Upload dashboard metrics shard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-metrics-${{ github.run_attempt }}-${{ matrix.shardIndex }}
+          path: dashboard-metrics/shard-${{ matrix.shardIndex }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload shard blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ github.run_attempt }}-${{ matrix.shardIndex }}
+          path: blob-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload shard failure diagnostics
+        if: steps.playwright.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asana-onboarding-diagnostics-${{ github.run_id }}-shard-${{ matrix.shardIndex }}
+          path: |
+            playwright-report/
+            test-results/
+            !**/.asana_auth.json
+            !**/storageState.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove temporary browser session
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/asana_auth.json"
+          rm -f .asana_auth.json
+
+      - name: Preserve Playwright shard outcome
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.playwright.outcome }}" != "success" ]]; then
+            echo "Playwright shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }} failed."
+            exit 1
+          fi
+
+  merge-reports:
+    name: Merge Playwright shard reports
+    needs: [onboarding-e2e]
+    if: ${{ always() && !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+    env:
+      PLAYWRIGHT_TREND_BASELINE_SIZE: ${{ vars.PLAYWRIGHT_TREND_BASELINE_SIZE || '10' }}
+      PLAYWRIGHT_TREND_MINIMUM_BASELINE: ${{ vars.PLAYWRIGHT_TREND_MINIMUM_BASELINE || '5' }}
+      PLAYWRIGHT_TREND_RETENTION: ${{ vars.PLAYWRIGHT_TREND_RETENTION || '60' }}
+      PLAYWRIGHT_TREND_DURATION_RATIO: ${{ vars.PLAYWRIGHT_TREND_DURATION_RATIO || '0.20' }}
+      PLAYWRIGHT_TREND_DURATION_SECONDS: ${{ vars.PLAYWRIGHT_TREND_DURATION_SECONDS || '30' }}
+      PLAYWRIGHT_TREND_IMBALANCE_INCREASE: ${{ vars.PLAYWRIGHT_TREND_IMBALANCE_INCREASE || '0.15' }}
+      PLAYWRIGHT_TREND_IMBALANCE_CEILING: ${{ vars.PLAYWRIGHT_TREND_IMBALANCE_CEILING || '0.35' }}
+      PLAYWRIGHT_TREND_RETRY_INCREASE: ${{ vars.PLAYWRIGHT_TREND_RETRY_INCREASE || '2' }}
+    steps:
+      - name: Check out protected main branch code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download dashboard metrics shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dashboard-metrics-artifacts
+          pattern: dashboard-metrics-${{ github.run_attempt }}-*
+          merge-multiple: true
+
+      - name: Merge safe dashboard metrics
+        run: >-
+          node scripts/merge-shard-metrics.mjs
+          --input-dir dashboard-metrics-artifacts
+          --output dashboard-metrics/playwright-shard-runs.json
+
+      - name: Upload dashboard metrics collection
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-shard-dashboard-metrics-${{ github.run_attempt }}
+          path: dashboard-metrics/playwright-shard-runs.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Retrieve bounded metrics history
+        shell: bash
+        run: |
+          set -euo pipefail
+          history_dir="$RUNNER_TEMP/metrics-history"
+          mkdir -p "$history_dir"
+          if git ls-remote --exit-code --heads origin metrics-history >/dev/null 2>&1; then
+            git fetch --depth=1 origin metrics-history
+            git show FETCH_HEAD:metrics/playwright-shard-history.json > "$history_dir/playwright-shard-history.json" || true
+          fi
+
+      - name: Analyze multi-run shard trends
+        id: trend_analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --current dashboard-metrics/playwright-shard-runs.json
+            --history-output "$RUNNER_TEMP/trend/dashboard-metrics-history.json"
+            --analysis-output "$RUNNER_TEMP/trend/shard-trend-analysis.json"
+            --baseline-size "$PLAYWRIGHT_TREND_BASELINE_SIZE"
+            --minimum-baseline "$PLAYWRIGHT_TREND_MINIMUM_BASELINE"
+            --retention "$PLAYWRIGHT_TREND_RETENTION"
+            --duration-ratio-threshold "$PLAYWRIGHT_TREND_DURATION_RATIO"
+            --duration-absolute-threshold-seconds "$PLAYWRIGHT_TREND_DURATION_SECONDS"
+            --imbalance-increase-threshold "$PLAYWRIGHT_TREND_IMBALANCE_INCREASE"
+            --imbalance-ceiling "$PLAYWRIGHT_TREND_IMBALANCE_CEILING"
+            --retry-increase-threshold "$PLAYWRIGHT_TREND_RETRY_INCREASE"
+          )
+          if [[ -f "$RUNNER_TEMP/metrics-history/playwright-shard-history.json" ]]; then
+            args+=(--history "$RUNNER_TEMP/metrics-history/playwright-shard-history.json")
+          fi
+          node scripts/analyze-shard-trends.mjs "${args[@]}"
+
+      - name: Publish safe metrics history branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code --heads origin metrics-history >/dev/null 2>&1; then
+            git fetch --depth=1 origin metrics-history
+            git switch --force-create metrics-history FETCH_HEAD
+          else
+            git switch --orphan metrics-history
+            git rm -rf .
+          fi
+          mkdir -p metrics
+          cp "$RUNNER_TEMP/trend/dashboard-metrics-history.json" metrics/playwright-shard-history.json
+          git add metrics/playwright-shard-history.json
+          git commit -m "chore(metrics): record Playwright shard trend for run ${{ github.run_id }}" || exit 0
+          git push origin HEAD:metrics-history
+
+      - name: Write trend summary with historical charts
+        shell: bash
+        run: >-
+          node scripts/render-trend-summary.mjs
+          --input "$RUNNER_TEMP/trend/shard-trend-analysis.json"
+          --history "$RUNNER_TEMP/trend/dashboard-metrics-history.json"
+
+      - name: Open or update performance-regression issue
+        if: steps.trend_analysis.outputs.regression == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ANALYSIS_PATH: ${{ runner.temp }}/trend/shard-trend-analysis.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='[CI] Playwright shard performance regression'
+          body_file="$RUNNER_TEMP/playwright-performance-regression.md"
+          node scripts/render-trend-issue.mjs --input "$ANALYSIS_PATH" --run-url "$RUN_URL" > "$body_file"
+          existing_issue="$(gh issue list --repo "$REPOSITORY" --state open --search '"[CI] Playwright shard performance regression" in:title' --json number --jq '.[0].number')"
+          if [[ -n "$existing_issue" && "$existing_issue" != "null" ]]; then
+            gh issue comment "$existing_issue" --repo "$REPOSITORY" --body-file "$body_file"
+          else
+            gh issue create --repo "$REPOSITORY" --title "$title" --body-file "$body_file"
+          fi
+
+      - name: Notify optional channels of performance regression
+        if: steps.trend_analysis.outputs.regression == 'true'
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PRUNE_NOTIFICATION_EMAIL_FROM: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM }}
+          PRUNE_NOTIFICATION_EMAIL_TO: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO }}
+        shell: bash
+        run: >-
+          node scripts/notify-operations.mjs
+          --event e2e-regression
+          --status warning
+          --detail "Configured trend thresholds were exceeded; inspect the safe trend artifact and run summary."
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload trend analysis artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-shard-trend-analysis-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/trend/dashboard-metrics-history.json
+            ${{ runner.temp }}/trend/shard-trend-analysis.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download shard blob reports
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@v5
+        with:
+          path: all-blob-reports
+          pattern: blob-report-${{ github.run_attempt }}-*
+          merge-multiple: true
+
+      - name: Merge reports into HTML
+        if: ${{ !cancelled() }}
+        run: npx playwright merge-reports --reporter html all-blob-reports
+
+      - name: Upload merged HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asana-onboarding-html-report-${{ github.run_attempt }}
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Notify optional channels of E2E failure
+        if: ${{ always() && !cancelled() && needs.onboarding-e2e.result != 'success' }}
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PRUNE_NOTIFICATION_EMAIL_FROM: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM }}
+          PRUNE_NOTIFICATION_EMAIL_TO: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO }}
+        shell: bash
+        run: >-
+          node scripts/notify-operations.mjs
+          --event e2e-failure
+          --status failed
+          --detail "One or more protected onboarding shards failed; inspect the linked report and diagnostics."
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

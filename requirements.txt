@@ -1,0 +1,5 @@
+playwright>=1.47,<2.0
+Pillow>=10.0,<12.0
+reportlab>=4.0,<5.0
+cryptography>=43.0,<46.0
+PyYAML>=6.0,<7.0

@@ -1,0 +1,325 @@
+{
+  "guide_title": "Asana: Create Your First Project",
+  "pdf_filename": "asana_first_project_user_guide.pdf",
+  "auth_state_path": ".asana_auth.json",
+  "output_dir": "output",
+  "login_url": "https://app.asana.com/",
+  "start_url": "https://app.asana.com/0/home",
+  "viewport_width": 1920,
+  "viewport_height": 1080,
+  "timeout_ms": 12000,
+  "logged_in_selectors": [
+    "nav",
+    "[aria-label*='Sidebar']",
+    "button:has-text('Create')",
+    "text=My tasks"
+  ],
+  "variables": {
+    "PROJECT_NAME": "Website Refresh — Automation Demo",
+    "ASSIGNEE_NAME": "Maya Chen",
+    "DUE_DATE": "Friday",
+    "COLLABORATOR_EMAIL": ""
+  },
+  "steps": [
+    {
+      "name": "Open Home",
+      "action": "goto",
+      "url": "https://app.asana.com/0/home",
+      "settle_ms": 1800
+    },
+    {
+      "name": "Capture workspace orientation",
+      "action": "capture",
+      "slug": "workspace_orientation",
+      "title": "Get oriented in your workspace",
+      "instruction": "Use Home for an overview of recent work. The sidebar keeps My tasks, Inbox, and Projects within reach.",
+      "annotations": [
+        {
+          "selectors": ["text=My tasks", "[aria-label*='My tasks']"],
+          "label": "Your personal action list"
+        },
+        {
+          "selectors": ["text=Inbox", "[aria-label*='Inbox']"],
+          "label": "Updates and notifications"
+        },
+        {
+          "selectors": ["button:has-text('Create')", "[aria-label*='Create']"],
+          "label": "Start new work here"
+        }
+      ]
+    },
+    {
+      "name": "Open Create menu",
+      "action": "click",
+      "selectors": [
+        "button:has-text('Create')",
+        "[aria-label*='Create']",
+        "button[title*='Create']"
+      ],
+      "settle_ms": 700
+    },
+    {
+      "name": "Capture Create menu",
+      "action": "capture",
+      "slug": "create_menu",
+      "title": "Start with a project",
+      "instruction": "Select Project to create a shared place for work that belongs together.",
+      "annotations": [
+        {
+          "selectors": ["[role='menuitem']:has-text('Project')", "text=Project"],
+          "label": "Choose Project"
+        }
+      ]
+    },
+    {
+      "name": "Choose Project",
+      "action": "click",
+      "selectors": [
+        "[role='menuitem']:has-text('Project')",
+        "button:has-text('Project')",
+        "text=Project"
+      ],
+      "settle_ms": 1000
+    },
+    {
+      "name": "Choose a blank project",
+      "action": "click",
+      "selectors": [
+        "button:has-text('Blank project')",
+        "[role='button']:has-text('Blank project')",
+        "text=Blank project"
+      ],
+      "settle_ms": 750
+    },
+    {
+      "name": "Capture project setup",
+      "action": "capture",
+      "slug": "project_setup",
+      "title": "Name the outcome and check access",
+      "instruction": "Use an outcome-focused project name. Confirm the intended team and privacy setting before you create it.",
+      "annotations": [
+        {
+          "selectors": ["input[placeholder*='Project name']", "input[aria-label*='Project name']", "input[name*='project']"],
+          "label": "Name the outcome"
+        },
+        {
+          "selectors": ["text=Privacy", "[aria-label*='Privacy']", "text=Private to members"],
+          "label": "Review who can access it"
+        }
+      ]
+    },
+    {
+      "name": "Enter project name",
+      "action": "fill",
+      "selectors": [
+        "input[placeholder*='Project name']",
+        "input[aria-label*='Project name']",
+        "input[name*='project']"
+      ],
+      "text": "{{PROJECT_NAME}}"
+    },
+    {
+      "name": "Create project",
+      "action": "click",
+      "selectors": [
+        "button:has-text('Create project')",
+        "button:has-text('Create')",
+        "[role='button']:has-text('Create project')"
+      ],
+      "settle_ms": 1700
+    },
+    {
+      "name": "Capture empty project",
+      "action": "capture",
+      "slug": "project_overview",
+      "title": "Create a simple work structure",
+      "instruction": "Group tasks by stage. Three short sections are enough to make a new project scannable: Plan, Build, and Launch.",
+      "annotations": [
+        {
+          "selectors": ["button:has-text('Add section')", "text=Add section", "[aria-label*='Add section']"],
+          "label": "Add a work stage"
+        },
+        {
+          "selectors": ["text={{PROJECT_NAME}}", "h1"],
+          "label": "Shared project context"
+        }
+      ]
+    },
+    {
+      "name": "Add Plan section",
+      "action": "click",
+      "selectors": ["button:has-text('Add section')", "text=Add section", "[aria-label*='Add section']"],
+      "settle_ms": 350
+    },
+    {
+      "name": "Name Plan section",
+      "action": "fill",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "text": "Plan"
+    },
+    {
+      "name": "Confirm Plan section",
+      "action": "press",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "key": "Enter"
+    },
+    {
+      "name": "Add Build section",
+      "action": "click",
+      "selectors": ["button:has-text('Add section')", "text=Add section", "[aria-label*='Add section']"],
+      "settle_ms": 350
+    },
+    {
+      "name": "Name Build section",
+      "action": "fill",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "text": "Build"
+    },
+    {
+      "name": "Confirm Build section",
+      "action": "press",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "key": "Enter"
+    },
+    {
+      "name": "Add Launch section",
+      "action": "click",
+      "selectors": ["button:has-text('Add section')", "text=Add section", "[aria-label*='Add section']"],
+      "settle_ms": 350
+    },
+    {
+      "name": "Name Launch section",
+      "action": "fill",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "text": "Launch"
+    },
+    {
+      "name": "Confirm Launch section",
+      "action": "press",
+      "selectors": ["input[placeholder*='Section']", "input[aria-label*='Section']", "input:focus"],
+      "key": "Enter"
+    },
+    {
+      "name": "Capture section structure",
+      "action": "capture",
+      "slug": "sections",
+      "title": "Organize work by stage",
+      "instruction": "Short, action-oriented sections let teammates scan the project and understand its flow at a glance.",
+      "annotations": [
+        {
+          "selectors": ["text=Plan"],
+          "label": "First: decide what is needed"
+        },
+        {
+          "selectors": ["text=Build"],
+          "label": "Then: do the work"
+        },
+        {
+          "selectors": ["text=Launch"],
+          "label": "Finally: release and review"
+        }
+      ]
+    },
+    {
+      "name": "Create first task",
+      "action": "click",
+      "selectors": [
+        "text=Plan >> xpath=following::button[contains(., 'Add task')][1]",
+        "button:has-text('Add task')",
+        "[aria-label*='Add task']"
+      ],
+      "settle_ms": 400
+    },
+    {
+      "name": "Enter task title",
+      "action": "fill",
+      "selectors": ["input[placeholder*='Task name']", "input[aria-label*='Task name']", "input:focus"],
+      "text": "Audit current website pages"
+    },
+    {
+      "name": "Confirm task title",
+      "action": "press",
+      "selectors": ["input[placeholder*='Task name']", "input[aria-label*='Task name']", "input:focus"],
+      "key": "Enter",
+      "settle_ms": 650
+    },
+    {
+      "name": "Open first task",
+      "action": "click",
+      "selectors": ["text=Audit current website pages"],
+      "settle_ms": 850
+    },
+    {
+      "name": "Capture task detail",
+      "action": "capture",
+      "slug": "task_detail",
+      "title": "Turn an item into accountable work",
+      "instruction": "Use an action-oriented task name. Then make ownership, timing, and the expected output explicit in the task detail pane.",
+      "annotations": [
+        {
+          "selectors": ["text=Audit current website pages"],
+          "label": "Use a specific, action-led title"
+        },
+        {
+          "selectors": ["button:has-text('Assignee')", "[aria-label*='Assignee']", "text=Assignee"],
+          "label": "Give the task one owner"
+        },
+        {
+          "selectors": ["button:has-text('Due date')", "[aria-label*='Due date']", "text=Due date"],
+          "label": "Set a realistic next date"
+        }
+      ]
+    },
+    {
+      "name": "Open Share dialog",
+      "action": "click",
+      "selectors": [
+        "button:has-text('Share')",
+        "[aria-label*='Share']",
+        "button[title*='Share']"
+      ],
+      "settle_ms": 650
+    },
+    {
+      "name": "Capture Share dialog",
+      "action": "capture",
+      "slug": "share_project",
+      "title": "Invite the people who need the work",
+      "instruction": "Enter a teammate and deliberately choose the access level that matches how they should contribute. The guide runner will not send an invite unless explicitly authorized.",
+      "annotations": [
+        {
+          "selectors": ["input[placeholder*='name or email']", "input[aria-label*='name or email']", "input[type='email']"],
+          "label": "Add a collaborator"
+        },
+        {
+          "selectors": ["button:has-text('Editor')", "text=Editor", "text=Viewer", "text=Commenter"],
+          "label": "Choose an appropriate role"
+        }
+      ]
+    },
+    {
+      "name": "Close Share dialog",
+      "action": "press",
+      "selectors": ["input[placeholder*='name or email']", "input[aria-label*='name or email']", "input[type='email']"],
+      "key": "Escape",
+      "settle_ms": 400
+    },
+    {
+      "name": "Capture completed starter project",
+      "action": "capture",
+      "slug": "starter_project_complete",
+      "title": "Repeat the clarity loop",
+      "instruction": "You now have a project, a readable structure, and a specific first task. Repeat the pattern: capture work, assign it, add context, and share it.",
+      "annotations": [
+        {
+          "selectors": ["text=Plan"],
+          "label": "Shared work is visible"
+        },
+        {
+          "selectors": ["text=Audit current website pages"],
+          "label": "Start with the next action"
+        }
+      ]
+    }
+  ]
+}

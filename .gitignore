@@ -1,0 +1,27 @@
+# Browser authentication state and local secrets
+.asana_auth.json
+*.auth.json
+*.auth.b64
+.env
+
+# Generated test artifacts
+playwright-report/
+test-results/
+smoke_output/
+output/
+
+# Local dependencies and Python cache
+node_modules/
+__pycache__/
+*.pyc
+
+# Session-recovery output
+*.sealed.json
+*.recovered.json
+recovery_smoke_output/
+recovery_cli_test/
+.env
+*.pem
+*.key
+client_secret*
+node_modules/

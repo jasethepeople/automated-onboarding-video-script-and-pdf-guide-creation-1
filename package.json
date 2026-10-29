@@ -1,0 +1,20 @@
+{
+  "name": "asana-onboarding-asset-suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated browser checks for the representative Asana onboarding journey.",
+  "scripts": {
+    "test:onboarding": "playwright test",
+    "test:onboarding:headed": "playwright test --headed",
+    "test:onboarding:debug": "playwright test --debug",
+    "test:onboarding:validate": "tsc -p tsconfig.json && playwright test --list",
+    "verify:features": "node scripts/verify-feature-completeness.mjs --output feature-completeness-report.json",
+    "verify:all": "bash scripts/run-all-features.sh",
+    "report:onboarding": "playwright show-report playwright-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
+  }
+}

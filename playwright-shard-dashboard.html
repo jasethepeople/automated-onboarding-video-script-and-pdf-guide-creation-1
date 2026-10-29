@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Local visualizer for Playwright shard execution metrics exported from GitHub Actions." />
+  <title>Playwright Shard Observatory</title>
+  <style>
+    :root {
+      --bg: #090d18;
+      --surface: #101829;
+      --surface-2: #151f33;
+      --surface-3: #1b2740;
+      --border: #2a3856;
+      --text: #edf3ff;
+      --muted: #9aabc9;
+      --faint: #6f809f;
+      --accent: #65d7c5;
+      --accent-2: #7c9cff;
+      --warning: #ffbc66;
+      --danger: #ff758f;
+      --success: #65d7c5;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .26);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: radial-gradient(circle at 82% 0%, #162446 0, transparent 36%), var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    button, select, input { font: inherit; }
+    .shell { max-width: 1520px; margin: 0 auto; padding: 28px clamp(18px, 3vw, 54px) 56px; }
+    .topbar { display: flex; gap: 22px; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 5px 0 7px; font-size: clamp(29px, 4vw, 44px); line-height: 1.08; letter-spacing: -.035em; }
+    .subtitle { color: var(--muted); max-width: 760px; margin: 0; }
+    .privacy { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; padding: 10px 12px; border: 1px solid var(--border); background: rgba(16, 24, 41, .78); border-radius: 10px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 22px; }
+    .btn, .select { min-height: 40px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); padding: 8px 12px; cursor: pointer; transition: .18s ease; }
+    .btn:hover, .select:hover { border-color: #526c9c; transform: translateY(-1px); }
+    .btn.primary { border-color: transparent; background: linear-gradient(135deg, var(--accent), #4db6e8); color: #07131a; font-weight: 800; }
+    .btn.ghost { background: transparent; color: var(--muted); }
+    .btn:disabled { opacity: .45; pointer-events: none; }
+    .spacer { flex: 1; }
+    .dropzone { display: grid; place-items: center; text-align: center; min-height: 196px; padding: 28px; border: 1px dashed #5470a2; background: linear-gradient(135deg, rgba(101, 215, 197, .075), rgba(124, 156, 255, .06)); border-radius: 16px; margin: 0 0 22px; transition: .2s ease; }
+    .dropzone.drag { border-color: var(--accent); background: rgba(101, 215, 197, .12); transform: scale(1.005); }
+    .dropzone h2 { margin: 0 0 7px; font-size: 20px; }
+    .dropzone p { max-width: 650px; color: var(--muted); margin: 0 0 15px; }
+    .error { color: #ffc1ce; font-size: 13px; margin-top: 12px; max-width: 780px; }
+    .hidden { display: none !important; }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 18px; }
+    .filters label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+    .card { background: linear-gradient(155deg, rgba(21,31,51,.96), rgba(14,21,37,.96)); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+    .metric { padding: 18px; grid-column: span 3; min-height: 126px; }
+    .metric .label { color: var(--muted); font-size: 13px; font-weight: 650; }
+    .metric .value { font-weight: 800; font-size: 31px; letter-spacing: -.03em; margin: 8px 0 3px; }
+    .metric .detail { color: var(--faint); font-size: 12px; }
+    .chart { padding: 18px; min-height: 346px; }
+    .chart.span-7 { grid-column: span 7; }
+    .chart.span-5 { grid-column: span 5; }
+    .chart.span-12 { grid-column: span 12; }
+    .chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; margin-bottom: 12px; }
+    .chart h2, .table-card h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
+    .chart p, .table-card .small { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    canvas { width: 100%; height: 254px; display: block; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; color: var(--muted); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 9px; height: 9px; border-radius: 999px; background: var(--accent); }
+    .swatch.purple { background: var(--accent-2); }
+    .swatch.warn { background: var(--warning); }
+    .table-card { grid-column: span 12; padding: 18px; overflow: hidden; }
+    .table-wrap { overflow-x: auto; margin-top: 15px; }
+    table { width: 100%; border-collapse: collapse; min-width: 880px; }
+    th { color: var(--faint); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 10px 11px; border-bottom: 1px solid var(--border); }
+    td { color: var(--text); font-size: 13px; padding: 12px 11px; border-bottom: 1px solid rgba(42,56,86,.72); vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+    tr:hover td { background: rgba(124,156,255,.045); }
+    .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 750; text-transform: capitalize; }
+    .success { color: #9cf0e3; background: rgba(101,215,197,.12); }
+    .failure { color: #ffc0cd; background: rgba(255,117,143,.12); }
+    .cancelled, .skipped { color: #ffd79d; background: rgba(255,188,102,.13); }
+    a { color: #aabdff; text-decoration: none; } a:hover { text-decoration: underline; }
+    .empty-chart { display: grid; place-items: center; height: 254px; color: var(--faint); text-align: center; border: 1px dashed rgba(84,112,162,.5); border-radius: 10px; }
+    .footer { margin-top: 18px; color: var(--faint); font-size: 12px; }
+    @media (max-width: 980px) { .metric { grid-column: span 6; } .chart.span-7, .chart.span-5 { grid-column: span 12; } .topbar { flex-direction: column; } }
+    @media (max-width: 600px) { .shell { padding: 20px 15px 42px; } .metric { grid-column: span 12; } .privacy { white-space: normal; } .toolbar { align-items: stretch; } .spacer { display: none; } .btn, .select { flex: 1; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">GitHub Actions · Playwright E2E</div>
+        <h1>Shard Observatory</h1>
+        <p class="subtitle">Local performance analysis for independent Playwright onboarding shards. Import a safe run-metrics JSON file to inspect duration, balance, retries, and failure trends.</p>
+      </div>
+      <div class="privacy"><span class="dot"></span> Local-only processing · No network requests</div>
+    </header>
+
+    <section class="toolbar" aria-label="Dashboard actions">
+      <button id="importButton" class="btn primary">Import run metrics</button>
+      <input id="fileInput" type="file" accept="application/json,.json" class="hidden" />
+      <button id="templateButton" class="btn">Download empty template</button>
+      <button id="csvButton" class="btn" disabled>Export filtered CSV</button>
+      <div class="spacer"></div>
+      <button id="resetButton" class="btn ghost" disabled>Clear local data</button>
+    </section>
+
+    <section id="dropzone" class="dropzone" aria-label="Drop JSON metrics file here">
+      <div>
+        <h2>Import real workflow metrics</h2>
+        <p>Drop a JSON file matching the dashboard schema, or select one using the import button. The dashboard begins empty by design and never sends imported data anywhere.</p>
+        <button id="dropImportButton" class="btn">Choose JSON file</button>
+        <div id="errorMessage" class="error hidden" role="alert"></div>
+      </div>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="filters">
+        <label>Run status
+          <select id="statusFilter" class="select">
+            <option value="all">All statuses</option>
+            <option value="success">Success</option>
+            <option value="failure">Failure</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="skipped">Skipped</option>
+          </select>
+        </label>
+        <label>History
+          <select id="historyFilter" class="select">
+            <option value="all">All imported runs</option>
+            <option value="20">Latest 20 runs</option>
+            <option value="10">Latest 10 runs</option>
+            <option value="5">Latest 5 runs</option>
+          </select>
+        </label>
+        <span id="datasetNote" class="small"></span>
+      </div>
+
+      <div class="grid">
+        <article class="card metric"><div class="label">Average workflow duration</div><div id="avgDuration" class="value">—</div><div id="avgDurationDetail" class="detail">No runs loaded</div></article>
+        <article class="card metric"><div class="label">Workflow success rate</div><div id="successRate" class="value">—</div><div id="successRateDetail" class="detail">No runs loaded</div></article>
+        <article class="card metric"><div class="label">Average shard imbalance</div><div id="imbalance" class="value">—</div><div id="imbalanceDetail" class="detail">Compare longest and shortest shard</div></article>
+        <article class="card metric"><div class="label">Session / test retries</div><div id="retryRate" class="value">—</div><div id="retryDetail" class="detail">Retries per shard record</div></article>
+
+        <article class="card chart span-7">
+          <div class="chart-head"><div><h2>Workflow duration trend</h2><p>Whole workflow wall-clock duration across the filtered run history.</p></div><div class="legend"><span><i class="swatch"></i>Duration</span><span><i class="swatch purple"></i>Median</span></div></div>
+          <div id="durationEmpty" class="empty-chart hidden">Import at least one run with a duration to render the trend.</div><canvas id="durationChart" aria-label="Workflow duration trend chart"></canvas>
+        </article>
+        <article class="card chart span-5">
+          <div class="chart-head"><div><h2>Latest run shard balance</h2><p>Duration by runner. Wide variation signals an opportunity to rebalance test work.</p></div><div class="legend"><span><i class="swatch"></i>Shard duration</span><span><i class="swatch warn"></i>Setup</span></div></div>
+          <div id="balanceEmpty" class="empty-chart hidden">No shard-duration data is available in the selected runs.</div><canvas id="balanceChart" aria-label="Latest run shard balance chart"></canvas>
+        </article>
+        <article class="card chart span-12">
+          <div class="chart-head"><div><h2>Runner-stage composition</h2><p>Latest run: setup, test execution, and unclassified runner time for each available shard.</p></div><div class="legend"><span><i class="swatch warn"></i>Setup</span><span><i class="swatch purple"></i>Test execution</span><span><i class="swatch" style="background:#43607e"></i>Other</span></div></div>
+          <div id="compositionEmpty" class="empty-chart hidden">Include setupSeconds and testSeconds in the input to view runner-stage composition.</div><canvas id="compositionChart" aria-label="Runner-stage composition chart"></canvas>
+        </article>
+        <article class="card table-card">
+          <div class="chart-head"><div><h2>Recent workflow runs</h2><p class="small">Run-level summary. Select the Actions run link for original CI context.</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Run</th><th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>Duration</th><th>Shards</th><th>Passed / Failed</th><th>Retries</th><th>Actions</th></tr></thead><tbody id="runsTable"></tbody></table></div>
+        </article>
+      </div>
+    </section>
+    <p class="footer">Dashboard inputs are intentionally limited to non-secret timing and outcome summaries. See <code>DASHBOARD_DATA_SCHEMA.md</code> in this package for the supported schema and collection guidance.</p>
+  </main>
+
+  <script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const els = {
+        file: $('fileInput'), import: $('importButton'), dropImport: $('dropImportButton'), dropzone: $('dropzone'), dashboard: $('dashboard'),
+        error: $('errorMessage'), template: $('templateButton'), csv: $('csvButton'), reset: $('resetButton'), status: $('statusFilter'), history: $('historyFilter'), note: $('datasetNote'),
+        avgDuration: $('avgDuration'), avgDurationDetail: $('avgDurationDetail'), successRate: $('successRate'), successRateDetail: $('successRateDetail'), imbalance: $('imbalance'), imbalanceDetail: $('imbalanceDetail'), retryRate: $('retryRate'), retryDetail: $('retryDetail'),
+        duration: $('durationChart'), balance: $('balanceChart'), composition: $('compositionChart'), durationEmpty: $('durationEmpty'), balanceEmpty: $('balanceEmpty'), compositionEmpty: $('compositionEmpty'), table: $('runsTable')
+      };
+      const state = { document: null };
+
+      const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+      const optionalNumber = (value) => value === undefined || value === null || value === '' ? null : number(value);
+      const seconds = (value) => {
+        const n = number(value); const m = Math.floor(n / 60); const s = Math.round(n % 60);
+        return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor((n % 3600) / 60)}m` : `${m}m ${String(s).padStart(2, '0')}s`;
+      };
+      const percent = (value, digits = 0) => `${(value * 100).toFixed(digits)}%`;
+      const mean = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+      const median = (values) => { const sorted = [...values].sort((a,b) => a-b); if (!sorted.length) return 0; const mid = Math.floor(sorted.length/2); return sorted.length % 2 ? sorted[mid] : (sorted[mid-1]+sorted[mid])/2; };
+      const escape = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+
+      function normalize(input) {
+        if (!input || input.schemaVersion !== 1 || !Array.isArray(input.runs)) throw new Error('Expected schemaVersion 1 with a runs array. See DASHBOARD_DATA_SCHEMA.md.');
+        return {
+          schemaVersion: 1,
+          generatedAt: input.generatedAt || null,
+          runs: input.runs.map((run, index) => {
+            if (!run || !run.runId || !run.workflow || !run.startedAt || !run.status || !Array.isArray(run.shards)) throw new Error(`Run at index ${index} is missing a required field.`);
+            const date = new Date(run.startedAt); if (Number.isNaN(date.getTime())) throw new Error(`Run ${run.runId} has an invalid startedAt timestamp.`);
+            return {
+              runId: String(run.runId), runNumber: run.runNumber ?? null, workflow: String(run.workflow), branch: String(run.branch || ''), trigger: String(run.trigger || ''), status: String(run.status).toLowerCase(), startedAt: date.toISOString(), durationSeconds: number(run.durationSeconds), url: run.url || '',
+              shards: run.shards.map((shard, shardIndex) => {
+                if (!shard || shard.index === undefined || shard.total === undefined || !shard.status || shard.durationSeconds === undefined) throw new Error(`Shard ${shardIndex + 1} in run ${run.runId} is missing a required field.`);
+                return { index: number(shard.index), total: number(shard.total), runner: String(shard.runner || ''), status: String(shard.status).toLowerCase(), queueSeconds: optionalNumber(shard.queueSeconds), setupSeconds: optionalNumber(shard.setupSeconds), testSeconds: optionalNumber(shard.testSeconds), durationSeconds: number(shard.durationSeconds), retries: number(shard.retries), testsPassed: number(shard.testsPassed), testsFailed: number(shard.testsFailed), testsSkipped: number(shard.testsSkipped) };
+              })
+            };
+          })
+        };
+      }
+
+      function currentRuns() {
+        if (!state.document) return [];
+        let runs = [...state.document.runs].sort((a,b) => new Date(a.startedAt) - new Date(b.startedAt));
+        if (els.status.value !== 'all') runs = runs.filter((run) => run.status === els.status.value);
+        if (els.history.value !== 'all') runs = runs.slice(-Number(els.history.value));
+        return runs;
+      }
+
+      function prepareCanvas(canvas) {
+        const ratio = window.devicePixelRatio || 1;
+        const width = Math.max(200, Math.floor(canvas.clientWidth)); const height = Math.max(180, Math.floor(canvas.clientHeight));
+        canvas.width = width * ratio; canvas.height = height * ratio;
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); return { ctx, width, height };
+      }
+      function roundedRect(ctx, x, y, w, h, r) { const radius = Math.min(r, w/2, h/2); ctx.beginPath(); ctx.moveTo(x+radius,y); ctx.arcTo(x+w,y,x+w,y+h,radius); ctx.arcTo(x+w,y+h,x,y+h,radius); ctx.arcTo(x,y+h,x,y,radius); ctx.arcTo(x,y,x+w,y,radius); ctx.closePath(); }
+      function clearCanvas(canvas, emptyEl, hasData) { canvas.classList.toggle('hidden', !hasData); emptyEl.classList.toggle('hidden', hasData); }
+      function paintGrid(ctx, width, height, top, bottom, left, right, maxValue) {
+        ctx.font = '11px Inter, system-ui, sans-serif'; ctx.fillStyle = '#8494b1'; ctx.strokeStyle = 'rgba(84,112,162,.32)'; ctx.lineWidth = 1;
+        for (let i=0; i<=4; i++) { const y = top + ((height-top-bottom)*i/4); ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(width-right,y); ctx.stroke(); const label = seconds(maxValue * (1 - i/4)); ctx.fillText(label, 4, y + 4); }
+      }
+      function drawDuration(runs) {
+        const data = runs.filter(r => r.durationSeconds > 0); clearCanvas(els.duration, els.durationEmpty, data.length > 0); if (!data.length) return;
+        const {ctx,width,height} = prepareCanvas(els.duration), left=52,right=12,top=16,bottom=34, maxValue=Math.max(...data.map(r=>r.durationSeconds), 1) * 1.12; paintGrid(ctx,width,height,top,bottom,left,right,maxValue);
+        const innerW=width-left-right, innerH=height-top-bottom; const x = (i) => left + (data.length === 1 ? innerW/2 : i*innerW/(data.length-1)); const y = (v) => top + innerH - v/maxValue*innerH;
+        const gradient=ctx.createLinearGradient(0,top,0,height-bottom); gradient.addColorStop(0,'rgba(101,215,197,.30)'); gradient.addColorStop(1,'rgba(101,215,197,0)');
+        ctx.beginPath(); data.forEach((run,i)=> i ? ctx.lineTo(x(i),y(run.durationSeconds)) : ctx.moveTo(x(i),y(run.durationSeconds))); ctx.lineTo(x(data.length-1),height-bottom); ctx.lineTo(x(0),height-bottom); ctx.closePath(); ctx.fillStyle=gradient; ctx.fill();
+        ctx.beginPath(); data.forEach((run,i)=> i ? ctx.lineTo(x(i),y(run.durationSeconds)) : ctx.moveTo(x(i),y(run.durationSeconds))); ctx.strokeStyle='#65d7c5'; ctx.lineWidth=2.5; ctx.stroke();
+        const med=median(data.map(r=>r.durationSeconds)); ctx.setLineDash([5,5]); ctx.beginPath(); ctx.moveTo(left,y(med)); ctx.lineTo(width-right,y(med)); ctx.strokeStyle='#7c9cff'; ctx.lineWidth=1.2; ctx.stroke(); ctx.setLineDash([]);
+        data.forEach((run,i)=> { ctx.beginPath(); ctx.arc(x(i),y(run.durationSeconds),3.5,0,Math.PI*2); ctx.fillStyle=run.status==='success'?'#65d7c5':'#ff758f'; ctx.fill(); });
+        const labels=Math.min(data.length, 6); for(let i=0;i<labels;i++){ const index=Math.round(i*(data.length-1)/Math.max(1,labels-1)); const d=new Date(data[index].startedAt); ctx.fillStyle='#8494b1'; ctx.font='11px Inter, system-ui, sans-serif'; ctx.textAlign='center'; ctx.fillText(`${d.getUTCMonth()+1}/${d.getUTCDate()}`, x(index), height-12); } ctx.textAlign='left';
+      }
+      function latestRun(runs) { return [...runs].sort((a,b)=>new Date(b.startedAt)-new Date(a.startedAt))[0]; }
+      function drawBalance(runs) {
+        const run=latestRun(runs); const data=run?.shards?.filter(s=>s.durationSeconds>0)||[]; clearCanvas(els.balance,els.balanceEmpty,data.length>0); if(!data.length)return;
+        const {ctx,width,height}=prepareCanvas(els.balance), left=42,right=14,top=20,bottom=34, max=Math.max(...data.map(s=>s.durationSeconds),1)*1.15, innerW=width-left-right,innerH=height-top-bottom,barGap=16,barW=Math.max(22,(innerW-barGap*(data.length-1))/data.length); paintGrid(ctx,width,height,top,bottom,left,right,max);
+        data.forEach((s,i)=>{const h=s.durationSeconds/max*innerH,x=left+i*(barW+barGap),y=height-bottom-h; roundedRect(ctx,x,y,barW,h,6); ctx.fillStyle=s.status==='success'?'#65d7c5':'#ff758f';ctx.fill(); if(s.setupSeconds!==null){const setupH=Math.min(h,s.setupSeconds/max*innerH); roundedRect(ctx,x,y,barW,setupH,6);ctx.fillStyle='rgba(255,188,102,.78)';ctx.fill();} ctx.fillStyle='#8494b1';ctx.font='11px Inter, system-ui, sans-serif';ctx.textAlign='center';ctx.fillText(`S${s.index}`,x+barW/2,height-12);ctx.fillStyle='#edf3ff';ctx.fillText(seconds(s.durationSeconds),x+barW/2,Math.max(14,y-6));});ctx.textAlign='left';
+      }
+      function drawComposition(runs) {
+        const run=latestRun(runs); const data=run?.shards?.filter(s=>s.durationSeconds>0 && (s.setupSeconds!==null || s.testSeconds!==null))||[]; clearCanvas(els.composition,els.compositionEmpty,data.length>0);if(!data.length)return;
+        const {ctx,width,height}=prepareCanvas(els.composition),left=60,right=20,top=22,bottom=35,row=44,gap=18;ctx.font='12px Inter, system-ui, sans-serif';
+        data.forEach((s,i)=>{ const y=top+i*(row+gap); const trackW=width-left-right; const setup=Math.min(s.durationSeconds, s.setupSeconds||0), test=Math.min(Math.max(0,s.durationSeconds-setup),s.testSeconds||0), other=Math.max(0,s.durationSeconds-setup-test); let cursor=left; [[setup,'#ffbc66'],[test,'#7c9cff'],[other,'#43607e']].forEach(([value,color])=>{const w=s.durationSeconds?value/s.durationSeconds*trackW:0;if(w){roundedRect(ctx,cursor,y,w,row,5);ctx.fillStyle=color;ctx.fill();cursor+=w;}});ctx.fillStyle='#c8d4ec';ctx.fillText(`Shard ${s.index}/${s.total}`,6,y+26);ctx.textAlign='right';ctx.fillStyle='#edf3ff';ctx.fillText(seconds(s.durationSeconds),width-2,y+26);ctx.textAlign='left';});
+      }
+      function renderTable(runs) { const rows=[...runs].sort((a,b)=>new Date(b.startedAt)-new Date(a.startedAt)); els.table.innerHTML=rows.length?rows.map(run=>{const shards=run.shards.length;const pass=run.shards.reduce((n,s)=>n+s.testsPassed,0),fail=run.shards.reduce((n,s)=>n+s.testsFailed,0),retries=run.shards.reduce((n,s)=>n+s.retries,0);const d=new Date(run.startedAt);return `<tr><td>${escape(run.runNumber ?? run.runId)}</td><td>${d.toISOString().replace('.000','')}</td><td>${escape(run.trigger||'—')}</td><td><span class="badge ${escape(run.status)}">${escape(run.status)}</span></td><td>${seconds(run.durationSeconds)}</td><td>${shards}</td><td>${pass} / ${fail}</td><td>${retries}</td><td>${run.url?`<a href="${escape(run.url)}" target="_blank" rel="noopener">Open run</a>`:'—'}</td></tr>`;}).join(''):`<tr><td colspan="9" style="color:#8494b1;text-align:center;padding:28px">No runs match the selected filters.</td></tr>`; }
+      function renderMetrics(runs) {
+        const avg=mean(runs.map(r=>r.durationSeconds).filter(Boolean)); const successful=runs.filter(r=>r.status==='success').length; const imbalances=runs.map(r=>{const durations=r.shards.map(s=>s.durationSeconds).filter(Boolean);return durations.length>1?(Math.max(...durations)-Math.min(...durations))/Math.max(...durations):null;}).filter(v=>v!==null); const shards=runs.flatMap(r=>r.shards), totalRetries=shards.reduce((n,s)=>n+s.retries,0); const pass=shards.reduce((n,s)=>n+s.testsPassed,0),fail=shards.reduce((n,s)=>n+s.testsFailed,0);
+        els.avgDuration.textContent=runs.length?seconds(avg):'—';els.avgDurationDetail.textContent=runs.length?`${runs.length} filtered workflow run${runs.length===1?'':'s'}`:'No runs loaded';els.successRate.textContent=runs.length?percent(successful/runs.length):'—';els.successRateDetail.textContent=runs.length?`${successful} successful run${successful===1?'':'s'}`:'No runs loaded';els.imbalance.textContent=imbalances.length?percent(mean(imbalances)): '—';els.imbalanceDetail.textContent=imbalances.length?'Lower is a more balanced matrix':'Requires two or more shards';els.retryRate.textContent=shards.length?`${totalRetries}`:'—';els.retryDetail.textContent=shards.length?`${(totalRetries/shards.length).toFixed(2)} retries per shard · ${pass} passed / ${fail} failed`:'Retries per shard record';
+      }
+      function render() { const runs=currentRuns(); renderMetrics(runs);drawDuration(runs);drawBalance(runs);drawComposition(runs);renderTable(runs);els.note.textContent=state.document?.generatedAt?`Imported ${state.document.runs.length} run(s) · export generated ${new Date(state.document.generatedAt).toISOString()}`:`Imported ${state.document?.runs.length||0} run(s)`; }
+      function showError(message) { els.error.textContent=message;els.error.classList.remove('hidden'); }
+      function clearError() { els.error.textContent='';els.error.classList.add('hidden'); }
+      function loadFile(file) { if(!file)return; if(file.size>5*1024*1024){showError('The dashboard accepts small metrics summaries only. File is larger than 5 MB.');return;} const reader=new FileReader();reader.onload=()=>{try{state.document=normalize(JSON.parse(reader.result));localStorage.setItem('playwrightShardDashboard',JSON.stringify(state.document));els.dropzone.classList.add('hidden');els.dashboard.classList.remove('hidden');els.csv.disabled=false;els.reset.disabled=false;clearError();render();}catch(error){showError(error.message||'Could not import the selected JSON file.');}};reader.onerror=()=>showError('Could not read the selected file.');reader.readAsText(file); }
+      function csvValue(value) { const text=String(value??'');return /[",\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text; }
+      function exportCsv() { const rows=[];currentRuns().forEach(run=>run.shards.forEach(shard=>rows.push({runId:run.runId,runNumber:run.runNumber,workflow:run.workflow,branch:run.branch,trigger:run.trigger,runStatus:run.status,startedAt:run.startedAt,workflowDurationSeconds:run.durationSeconds,shardIndex:shard.index,shardTotal:shard.total,runner:shard.runner,shardStatus:shard.status,queueSeconds:shard.queueSeconds,setupSeconds:shard.setupSeconds,testSeconds:shard.testSeconds,shardDurationSeconds:shard.durationSeconds,retries:shard.retries,testsPassed:shard.testsPassed,testsFailed:shard.testsFailed,testsSkipped:shard.testsSkipped,url:run.url}))); const headers=Object.keys(rows[0]||{runId:''});const csv=[headers.join(','),...rows.map(row=>headers.map(key=>csvValue(row[key])).join(','))].join('\n');const blob=new Blob([csv],{type:'text/csv'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='playwright-shard-metrics.csv';link.click();URL.revokeObjectURL(link.href); }
+      function downloadTemplate(){const blob=new Blob([JSON.stringify({schemaVersion:1,generatedAt:new Date().toISOString(),runs:[]},null,2)+'\n'],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='playwright-shard-metrics.template.json';link.click();URL.revokeObjectURL(link.href);}
+      function restore(){try{const saved=localStorage.getItem('playwrightShardDashboard');if(saved){state.document=normalize(JSON.parse(saved));els.dropzone.classList.add('hidden');els.dashboard.classList.remove('hidden');els.csv.disabled=false;els.reset.disabled=false;render();}}catch{localStorage.removeItem('playwrightShardDashboard');}}
+      [els.import,els.dropImport].forEach(button=>button.addEventListener('click',()=>els.file.click()));els.file.addEventListener('change',event=>loadFile(event.target.files[0]));els.template.addEventListener('click',downloadTemplate);els.csv.addEventListener('click',exportCsv);els.reset.addEventListener('click',()=>{localStorage.removeItem('playwrightShardDashboard');state.document=null;els.dashboard.classList.add('hidden');els.dropzone.classList.remove('hidden');els.csv.disabled=true;els.reset.disabled=true;clearError();});[els.status,els.history].forEach(control=>control.addEventListener('change',render));['dragenter','dragover'].forEach(type=>els.dropzone.addEventListener(type,event=>{event.preventDefault();els.dropzone.classList.add('drag');}));['dragleave','drop'].forEach(type=>els.dropzone.addEventListener(type,event=>{event.preventDefault();els.dropzone.classList.remove('drag');}));els.dropzone.addEventListener('drop',event=>loadFile(event.dataTransfer.files[0]));window.addEventListener('resize',()=>{if(state.document)render();});restore();
+    })();
+  </script>
+</body>
+</html>

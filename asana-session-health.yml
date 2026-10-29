@@ -1,0 +1,152 @@
+name: Asana session health
+
+on:
+  schedule:
+    # Daily at 16:17 UTC. Avoids an on-the-hour burst and provides a full
+    # business-day window to renew a session before typical E2E runs.
+    - cron: '17 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: asana-session-health-main
+  cancel-in-progress: false
+
+jobs:
+  check-session:
+    name: Verify approved browser session
+    # A manual dispatch must also target the protected default branch. Scheduled
+    # workflows use the latest commit on the default branch automatically.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: asana-e2e-monitor
+    env:
+      CI: 'true'
+      ASANA_TEST_WORKSPACE_URL: ${{ vars.ASANA_TEST_WORKSPACE_URL }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+      SESSION_HEALTH_MAX_ATTEMPTS: '3'
+      SESSION_HEALTH_BASE_DELAY_SECONDS: '15'
+      SESSION_HEALTH_MAX_DELAY_SECONDS: '60'
+    steps:
+      - name: Check out protected main branch code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chromium and required Linux libraries
+        run: npx playwright install --with-deps chromium
+
+      - name: Materialize approved browser session
+        shell: bash
+        env:
+          ASANA_STORAGE_STATE_B64: ${{ secrets.ASANA_STORAGE_STATE_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ASANA_STORAGE_STATE_B64:-}" ]]; then
+            echo "ASANA_STORAGE_STATE_B64 is unavailable in the asana-e2e-monitor environment."
+            exit 1
+          fi
+
+          # Never print the original, decoded, or transformed browser session.
+          echo "::add-mask::$ASANA_STORAGE_STATE_B64"
+          auth_file="$RUNNER_TEMP/asana_auth.json"
+          umask 077
+          printf '%s' "$ASANA_STORAGE_STATE_B64" | base64 --decode > "$auth_file"
+          if [[ ! -s "$auth_file" ]]; then
+            echo "Decoded session-state file is empty."
+            exit 1
+          fi
+          node -e "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'));" "$auth_file"
+          echo "ASANA_STORAGE_STATE=$auth_file" >> "$GITHUB_ENV"
+
+      - name: Run session health with bounded retry
+        id: session_health
+        run: bash scripts/run-session-health-with-retry.sh
+
+      - name: Mark session as healthy
+        if: success()
+        run: |
+          {
+            echo '### Authentication session is healthy'
+            echo 'The scheduled session-health check reached the authenticated workspace successfully.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update an expiry remediation issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='[CI] Asana Playwright session renewal required'
+          body_file="$RUNNER_TEMP/session-health-issue.md"
+          cat > "$body_file" <<EOF
+          ## Authentication health check failed
+
+          The scheduled Playwright session-health check could not verify the approved Asana test session.
+
+          - **Classification:** ${{ steps.session_health.outputs.classification || 'bootstrap-or-secret-error' }}
+          - **Attempts:** ${{ steps.session_health.outputs.attempts || '0' }}
+          - **Workflow run:** ${RUN_URL}
+          - **Required action:** Refresh the dedicated test account's browser state through the approved manual SSO/MFA procedure, then replace the protected ASANA_STORAGE_STATE_B64 environment secret.
+          - **Safety note:** Do not add interactive login, OTP scraping, or credential values to this workflow or issue.
+
+          After replacing the session secret, use **Run workflow** from protected main to confirm the session-health check passes, then close this issue.
+          EOF
+
+          existing_issue="$(gh issue list --repo "$REPOSITORY" --state open --search '"[CI] Asana Playwright session renewal required" in:title' --json number --jq '.[0].number')"
+          if [[ -n "$existing_issue" && "$existing_issue" != "null" ]]; then
+            gh issue comment "$existing_issue" --repo "$REPOSITORY" --body "A new session-health failure occurred: $RUN_URL"
+          else
+            gh issue create --repo "$REPOSITORY" --title "$title" --body-file "$body_file"
+          fi
+
+      - name: Notify optional channels of session-health failure
+        if: failure()
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PRUNE_NOTIFICATION_EMAIL_FROM: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM }}
+          PRUNE_NOTIFICATION_EMAIL_TO: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO }}
+        shell: bash
+        run: >-
+          node scripts/notify-operations.mjs
+          --event session-health-failure
+          --status failed
+          --detail "The approved browser session was missing, rejected, expired, or could not be verified after bounded retry."
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asana-session-health-diagnostics-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+            test-results/session-health-retries/
+            !**/.asana_auth.json
+            !**/storageState.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove temporary browser session
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/asana_auth.json"
+          rm -f .asana_auth.json

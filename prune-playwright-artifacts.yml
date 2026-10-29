@@ -1,0 +1,151 @@
+name: Prune Playwright performance artifacts
+
+on:
+  schedule:
+    # Sunday 03:37 UTC. Scheduled runs execute destructive cleanup only after
+    # their allowlisted artifact plan is generated.
+    - cron: '37 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Use dry-run to inspect the deletion manifest; delete removes only allowlisted candidates.'
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, delete]
+      metrics_days:
+        description: 'Optional override for dashboard/trend metrics retention days.'
+        required: false
+        type: string
+      report_days:
+        description: 'Optional override for blob and merged report retention days.'
+        required: false
+        type: string
+      diagnostic_days:
+        description: 'Optional override for failure diagnostic retention days.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: prune-playwright-performance-artifacts
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Plan and prune recognized performance artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Scheduled runs use the reviewed retention policy and actively prune.
+      # Manual runs default to dry-run and require explicit delete selection.
+      PRUNE_MODE: ${{ inputs.mode || 'delete' }}
+      PLAYWRIGHT_PRUNE_METRICS_DAYS: ${{ inputs.metrics_days || vars.PLAYWRIGHT_PRUNE_METRICS_DAYS || '90' }}
+      PLAYWRIGHT_PRUNE_REPORT_DAYS: ${{ inputs.report_days || vars.PLAYWRIGHT_PRUNE_REPORT_DAYS || '30' }}
+      PLAYWRIGHT_PRUNE_DIAGNOSTIC_DAYS: ${{ inputs.diagnostic_days || vars.PLAYWRIGHT_PRUNE_DIAGNOSTIC_DAYS || '14' }}
+      PLAYWRIGHT_PRUNE_MAX_DELETIONS: ${{ vars.PLAYWRIGHT_PRUNE_MAX_DELETIONS || '100' }}
+      PRUNE_NOTIFICATION_EMAIL_FROM: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM }}
+      PRUNE_NOTIFICATION_EMAIL_TO: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO }}
+    steps:
+      - name: Check out trusted default-branch code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Retrieve Actions artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" | \
+            jq -s '{artifacts: [ .[] | .artifacts[]? ]}' > artifact-inventory.json
+          chmod 600 artifact-inventory.json
+
+      - name: Build allowlisted deletion manifest
+        id: plan
+        shell: bash
+        run: >-
+          node scripts/plan-artifact-prune.mjs
+          --input artifact-inventory.json
+          --output artifact-prune-manifest.json
+          --metrics-days "$PLAYWRIGHT_PRUNE_METRICS_DAYS"
+          --report-days "$PLAYWRIGHT_PRUNE_REPORT_DAYS"
+          --diagnostic-days "$PLAYWRIGHT_PRUNE_DIAGNOSTIC_DAYS"
+          --max-deletions "$PLAYWRIGHT_PRUNE_MAX_DELETIONS"
+
+      - name: Delete only allowlisted artifact IDs
+        if: env.PRUNE_MODE == 'delete' && steps.plan.outputs.deletion_permitted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r artifact_id; do
+            [[ -z "$artifact_id" ]] && continue
+            echo "Deleting allowlisted artifact ID ${artifact_id}"
+            gh api \
+              -X DELETE \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done < <(jq -r '.candidates[].id' artifact-prune-manifest.json)
+
+      - name: Notify optional channels of completed deletion
+        if: env.PRUNE_MODE == 'delete' && steps.plan.outputs.deletion_permitted == 'true'
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        shell: bash
+        run: >-
+          node scripts/notify-artifact-prune.mjs
+          --manifest artifact-prune-manifest.json
+          --status completed
+          --mode delete
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Notify optional channels of pruning failure
+        if: failure()
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        shell: bash
+        run: >-
+          node scripts/notify-artifact-prune.mjs
+          --manifest artifact-prune-manifest.json
+          --status failed
+          --mode "${{ env.PRUNE_MODE }}"
+          --error-summary "A pruning workflow step failed; inspect the linked GitHub Actions run."
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Record dry-run status
+        if: env.PRUNE_MODE != 'delete'
+        shell: bash
+        run: |
+          {
+            echo '### Artifact pruning dry run'
+            echo
+            echo 'No artifacts were deleted. Review the attached deletion manifest, then rerun this workflow with **delete** only if the plan is acceptable.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload pruning manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifact-prune-manifest-${{ github.run_attempt }}
+          path: artifact-prune-manifest.json
+          if-no-files-found: error
+          retention-days: 30

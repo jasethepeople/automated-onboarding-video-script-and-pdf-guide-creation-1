@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "onboarding-script-and-guide",
+      "required_paths": ["onboarding_video_script.md", "guide_generator.py"]
+    },
+    {
+      "id": "serial-playwright-journey",
+      "required_paths": ["tests/onboarding.spec.ts", "playwright.config.ts"]
+    },
+    {
+      "id": "safe-sharded-playwright-checks",
+      "required_paths": ["tests/onboarding-sharded.spec.ts", ".github/workflows/onboarding-e2e.yml"]
+    },
+    {
+      "id": "authenticated-session-gate",
+      "required_paths": ["tests/session-health.setup.ts", ".github/workflows/session-health.yml"]
+    },
+    {
+      "id": "session-retry-and-recovery-boundary",
+      "required_paths": ["scripts/run-session-health-with-retry.sh", "session_state_recovery.py"]
+    },
+    {
+      "id": "post-test-metrics-export",
+      "required_paths": ["scripts/export-shard-metrics.mjs", "scripts/merge-shard-metrics.mjs"]
+    },
+    {
+      "id": "local-dashboard",
+      "required_paths": ["dashboard/playwright-shard-dashboard.html", "DASHBOARD_DATA_SCHEMA.md"]
+    },
+    {
+      "id": "trend-regression-monitoring",
+      "required_paths": ["scripts/analyze-shard-trends.mjs", "scripts/render-trend-summary.mjs"]
+    },
+    {
+      "id": "artifact-pruning",
+      "required_paths": ["scripts/plan-artifact-prune.mjs", ".github/workflows/prune-artifacts.yml"]
+    },
+    {
+      "id": "aggregate-only-notifications",
+      "required_paths": ["scripts/notify-operations.mjs", "scripts/notify-artifact-prune.mjs"]
+    },
+    {
+      "id": "configuration-and-preflight",
+      "required_paths": ["scripts/configure-all-features.sh", ".github/workflows/operations-preflight.yml"]
+    },
+    {
+      "id": "architecture-and-deployment-presentation",
+      "required_paths": ["architecture_deployment_presentation.md", "NEW_GITHUB_REPOSITORY_DEPLOYMENT.md"]
+    }
+  ]
+}

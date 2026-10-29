@@ -1,0 +1,71 @@
+name: Playwright onboarding operations preflight
+
+on:
+  schedule:
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playwright-onboarding-operations-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Verify operational feature wiring
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PLAYWRIGHT_PRUNE_METRICS_DAYS: ${{ vars.PLAYWRIGHT_PRUNE_METRICS_DAYS || '90' }}
+      PLAYWRIGHT_PRUNE_REPORT_DAYS: ${{ vars.PLAYWRIGHT_PRUNE_REPORT_DAYS || '30' }}
+      PLAYWRIGHT_PRUNE_DIAGNOSTIC_DAYS: ${{ vars.PLAYWRIGHT_PRUNE_DIAGNOSTIC_DAYS || '14' }}
+      PLAYWRIGHT_PRUNE_MAX_DELETIONS: ${{ vars.PLAYWRIGHT_PRUNE_MAX_DELETIONS || '100' }}
+      PLAYWRIGHT_TREND_BASELINE_SIZE: ${{ vars.PLAYWRIGHT_TREND_BASELINE_SIZE || '10' }}
+      PLAYWRIGHT_TREND_MINIMUM_BASELINE: ${{ vars.PLAYWRIGHT_TREND_MINIMUM_BASELINE || '5' }}
+      SLACK_PRUNE_WEBHOOK_CONFIGURED: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL != '' }}
+      RESEND_API_KEY_CONFIGURED: ${{ secrets.RESEND_API_KEY != '' }}
+      PRUNE_EMAIL_FROM_CONFIGURED: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM != '' }}
+      PRUNE_EMAIL_TO_CONFIGURED: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO != '' }}
+    steps:
+      - name: Check out trusted default-branch code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check metrics-history branch availability
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --heads origin metrics-history >/dev/null 2>&1; then
+            echo 'METRICS_HISTORY_BRANCH_EXISTS=true' >> "$GITHUB_ENV"
+          else
+            echo 'METRICS_HISTORY_BRANCH_EXISTS=false' >> "$GITHUB_ENV"
+          fi
+
+      - name: Run non-destructive operations preflight
+        id: preflight
+        run: node scripts/operations-preflight.mjs
+
+      - name: Notify optional channels of preflight failure
+        if: failure()
+        continue-on-error: true
+        env:
+          SLACK_PRUNE_WEBHOOK_URL: ${{ secrets.SLACK_PRUNE_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PRUNE_NOTIFICATION_EMAIL_FROM: ${{ vars.PRUNE_NOTIFICATION_EMAIL_FROM }}
+          PRUNE_NOTIFICATION_EMAIL_TO: ${{ vars.PRUNE_NOTIFICATION_EMAIL_TO }}
+        shell: bash
+        run: >-
+          node scripts/notify-operations.mjs
+          --event operations-preflight-failure
+          --status failed
+          --detail "The non-destructive feature check found incomplete or invalid configuration; inspect the linked summary."
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
